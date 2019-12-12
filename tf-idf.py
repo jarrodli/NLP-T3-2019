@@ -1,17 +1,20 @@
 import matplotlib.pyplot as plt
 from scipy.linalg import svd
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import svds, eigs
 from tika import parser
 import numpy as np
 import collections
 import math
 import sys
 import os
+import re
 
 IDF_T = {}
 STOPWORDS = []
 TOTAL_DOCS = 0
 TOTAL_TERMS = 0
-K = 2
+K = 50
 
 # !! IF THERE IS A READ ERROR DELETE .DS_STORE !!
 # tf_idf calculations are based off of ::
@@ -78,7 +81,7 @@ class tf_idf:
 def convert_files():
 
 	c_path = str(os.getcwd())
-	pdf_path = c_path + "/18pdf"
+	pdf_path = c_path + "/inspect_pdfs"
 	directory = os.fsencode(pdf_path)
 	i = 0
 	for file in os.listdir(directory):
@@ -87,7 +90,7 @@ def convert_files():
 		if fname.endswith(".pdf"):
 			raw = parser.from_file(fname)
 			os.chdir(c_path + "/orig_text")
-			current_output = "text%s.txt" % i
+			current_output = "%s.txt" % i
 			with open(current_output, 'w+') as file:
 				file.write(raw['content'])
 				i += 1
@@ -163,10 +166,12 @@ def create_np_matrix(tf_idfs):
 # https://en.wikipedia.org/wiki/Latent_semantic_analysis
 
 def latent_semantic_analysis(M):
-
+	sys.stderr.write("calculating SVD...\n")
 	# carry out the svd of the matrix M
-	U, s, VT = svd(M)
+	M = csc_matrix(M, dtype=float)
+	U, s, VT  = svds(M,k=K)
 
+	'''
 	# turn the singular value list s into an n x m matrix
 	sv_matrix = np.zeros((TOTAL_TERMS,TOTAL_DOCS))
 	for i in range(min(TOTAL_TERMS,TOTAL_DOCS)):
@@ -181,22 +186,38 @@ def latent_semantic_analysis(M):
 
 	# rank reduce eigenvector matrix
 	U = U[:,0:K]
-
+	'''
 	V = np.transpose(VT)
+	print(str(V))
+	sys.stderr.write("finished calculating SVD\n")
+	return V, U, s
 
-	return V, U, sv_matrix
+def cosine_similarity(M, fnames):
 
-def cosine_similarity(v1, v2):
+	sys.stderr.write("calculating cosine cosine_similarity...\n")
+	adj_M = np.zeros((TOTAL_DOCS+1, TOTAL_DOCS+1))
+	#M = np.transpose(M)
 
-	v1 = document1.get_vector()
-	v1_denom = math.sqrt(np.sum(np.square(v1)))
+	for i in range(len(M)):
+		for j in range(i):
+			v1_denom = math.sqrt(np.sum(np.square(M[i])))
+			v2_denom = math.sqrt(np.sum(np.square(M[j])))
+			adj_M[i+1,j+1] = math.acos(np.dot(M[i], M[j]) / (v1_denom * v2_denom))
 
-	v2 = document2.get_vector()
-	v2_denom = math.sqrt(np.sum(np.square(v2)))
+	adj_M = np.around(np.reciprocal(adj_M, where=adj_M!=0), decimals=2)
 
-	final = math.acos(np.dot(v1, v2) / (v1_denom * v2_denom))
+	for i in range(len(M)):
+		fnames[i] = re.sub("b'","",fnames[i])
+		fnames[i] = re.sub(".txt'","",fnames[i])
+		fnames[i] = int(fnames[i])
 
-	print(final)
+		adj_M[0,i+1] = fnames[i]
+		adj_M[i+1,0] = fnames[i]
+
+	adj_M[0][0] = 0.0 # sanity assignment
+
+	print(str(adj_M))
+	return adj_M
 	
 
 if __name__ == '__main__':
@@ -209,7 +230,7 @@ if __name__ == '__main__':
 	RR_M, U, s = latent_semantic_analysis(M)
 	write_matrix(RR_M)
 	c_dot = None
-
+	
 	if len(sys.argv) > 1:
 		c_tfv = tf_idf()
 		with open(str(sys.argv[1]), "r") as file:
@@ -222,9 +243,13 @@ if __name__ == '__main__':
 		f_names.append(c_dot)
 
 	write_forder(f_names)
-
+	adj_M = cosine_similarity(RR_M, f_names)
+	np.savetxt("data.csv", adj_M, delimiter=",", fmt='%0.2f')
+	
+	'''
 	if c_dot is not None:
 		plot(RR_M, c_dot)
 	else:
 		plot(RR_M)
+	'''
 
